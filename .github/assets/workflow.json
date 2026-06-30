@@ -1,0 +1,452 @@
+{
+  "revision": 0,
+  "last_node_id": 94,
+  "last_link_id": 165,
+  "nodes": [
+    {
+      "id": 51,
+      "type": "CLIPTextEncode",
+      "pos": [-280, -920],
+      "size": [390, 230],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 72
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "slot_index": 0,
+          "links": [80, 128]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPTextEncode",
+        "cnr_id": "comfy-core",
+        "ver": "0.25.0"
+      },
+      "widgets_values": [
+        "she has pink hair, white red and blue 3d glasses, a headband with fake pink cat ears"
+      ],
+      "color": "#232",
+      "bgcolor": "#353"
+    },
+    {
+      "id": 53,
+      "type": "KSampler",
+      "pos": [120, -790],
+      "size": [350, 570],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 165
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 128
+        },
+        {
+          "name": "negative",
+          "type": "CONDITIONING",
+          "link": 76
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 143
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "slot_index": 0,
+          "links": [78]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "KSampler",
+        "cnr_id": "comfy-core",
+        "ver": "0.25.0"
+      },
+      "widgets_values": [42, "fixed", 4, 1, "euler", "simple", 1]
+    },
+    {
+      "id": 54,
+      "type": "VAEDecode",
+      "pos": [480, -840],
+      "size": [225, 8],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 78
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 79
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "slot_index": 0,
+          "links": [115]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEDecode",
+        "cnr_id": "comfy-core",
+        "ver": "0.25.0"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 55,
+      "type": "UNETLoader",
+      "pos": [-630, -420],
+      "size": [330, 90],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "showAdvanced": false,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [162]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UNETLoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.25.0",
+        "models": [
+          {
+            "name": "krea2_turbo_fp8_scaled.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/diffusion_models/krea2_turbo_fp8_scaled.safetensors",
+            "directory": "diffusion_models"
+          }
+        ]
+      },
+      "widgets_values": ["krea2_turbo_bf16.safetensors", "default"]
+    },
+    {
+      "id": 56,
+      "type": "CLIPLoader",
+      "pos": [-630, -290],
+      "size": [330, 120],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [72]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPLoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.25.0",
+        "models": [
+          {
+            "name": "qwen3vl_4b_fp8_scaled.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/text_encoders/qwen3vl_4b_fp8_scaled.safetensors",
+            "directory": "text_encoders"
+          }
+        ]
+      },
+      "widgets_values": [
+        "qwen3vl_4b_fp8_scaled.safetensors",
+        "krea2",
+        "default"
+      ]
+    },
+    {
+      "id": 57,
+      "type": "VAELoader",
+      "pos": [-630, -130],
+      "size": [330, 80],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [79, 103]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAELoader",
+        "cnr_id": "comfy-core",
+        "ver": "0.25.0",
+        "models": [
+          {
+            "name": "qwen_image_vae.safetensors",
+            "url": "https://huggingface.co/Comfy-Org/Krea-2/resolve/main/vae/qwen_image_vae.safetensors",
+            "directory": "vae"
+          }
+        ]
+      },
+      "widgets_values": ["qwen_image_vae.safetensors"]
+    },
+    {
+      "id": 58,
+      "type": "ConditioningZeroOut",
+      "pos": [-280, -650],
+      "size": [225, 8],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "conditioning",
+          "type": "CONDITIONING",
+          "link": 80
+        }
+      ],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [76]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ConditioningZeroOut",
+        "cnr_id": "comfy-core",
+        "ver": "0.25.0"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 72,
+      "type": "VAEEncode",
+      "pos": [-280, -440],
+      "size": [225, 8],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "pixels",
+          "type": "IMAGE",
+          "link": 136
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 103
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [143, 163]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEEncode"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 73,
+      "type": "LoadImage",
+      "pos": [-630, -920],
+      "size": [330, 460],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [131]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": ["input.png", "image"]
+    },
+    {
+      "id": 75,
+      "type": "PreviewImage",
+      "pos": [480, -790],
+      "size": [330, 570],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 115
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 80,
+      "type": "ImageScaleToTotalPixels",
+      "pos": [-280, -600],
+      "size": [390, 120],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "showAdvanced": false,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 131
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [136]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ImageScaleToTotalPixels"
+      },
+      "widgets_values": ["lanczos", 1, 16]
+    },
+    {
+      "id": 82,
+      "type": "LoraLoaderModelOnly",
+      "pos": [-280, -340],
+      "size": [390, 120],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 164
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [165]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoraLoaderModelOnly"
+      },
+      "widgets_values": ["NK2E-v1.0.safetensors", 0.75]
+    },
+    {
+      "id": 92,
+      "type": "NK2EInContextEditNode",
+      "pos": [-280, -390],
+      "size": [225, 8],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 162
+        },
+        {
+          "name": "reference",
+          "type": "LATENT",
+          "link": 163
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [164]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "NK2EInContextEditNode"
+      },
+      "widgets_values": []
+    }
+  ],
+  "links": [
+    [72, 56, 0, 51, 0, "CLIP"],
+    [76, 58, 0, 53, 2, "CONDITIONING"],
+    [78, 53, 0, 54, 0, "LATENT"],
+    [79, 57, 0, 54, 1, "VAE"],
+    [80, 51, 0, 58, 0, "CONDITIONING"],
+    [103, 57, 0, 72, 1, "VAE"],
+    [115, 54, 0, 75, 0, "IMAGE"],
+    [128, 51, 0, 53, 1, "CONDITIONING"],
+    [131, 73, 0, 80, 0, "IMAGE"],
+    [136, 80, 0, 72, 0, "IMAGE"],
+    [143, 72, 0, 53, 3, "LATENT"],
+    [162, 55, 0, 92, 0, "MODEL"],
+    [163, 72, 0, 92, 1, "LATENT"],
+    [164, 92, 0, 82, 0, "MODEL"],
+    [165, 82, 0, 53, 0, "MODEL"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.19653061224489796,
+      "offset": [3850.919003115265, 1368.3333333333333]
+    },
+    "frontendVersion": "1.47.2"
+  },
+  "version": 0.4
+}
