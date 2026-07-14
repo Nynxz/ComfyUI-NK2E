@@ -11,6 +11,6 @@ Repository = "https://github.com/Nynxz/ComfyUI-NK2E"
 
 [tool.comfy]
 PublisherId = "nynxz" 
-DisplayName = "NK2E"
+DisplayName = "ComfyUI-NK2E"
 Icon = "https://avatars.githubusercontent.com/u/60878743?v=4"
 Repository = "https://github.com/Nynxz/ComfyUI-NK2E"

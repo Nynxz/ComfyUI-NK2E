@@ -12,7 +12,25 @@ WRAPPER_KEY = "nk2e_incontext"
 MODEL_REF_KEY = "nk2e_incontext_ref"
 
 
-def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, ref):
+def _nk2e_log(message):
+    print(f"[NK2E] {message}", flush=True)
+
+
+def _shape_list(refs):
+    refs = refs if isinstance(refs, (list, tuple)) else [refs]
+    return [tuple(ref.shape) for ref in refs]
+
+
+def _conditioning_refs(conditioning):
+    refs = []
+    for _, cond in conditioning:
+        cond_refs = cond.get("reference_latents")
+        if cond_refs is not None and len(cond_refs) > len(refs):
+            refs = cond_refs
+    return list(refs)
+
+
+def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, refs, log_details=False):
     temporal = x.ndim == 5
     if temporal:
         b5, c5, t5, h5, w5 = x.shape
@@ -25,17 +43,31 @@ def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, r
     h_, w_ = H // patch, W // patch
     img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch, pw=patch)
 
-    ref = ref.to(device=x.device, dtype=x.dtype)
-    if ref.ndim == 5:
-        rb, rc, rt, rh, rw = ref.shape
-        ref = ref.reshape(rb * rt, rc, rh, rw)
-    if ref.shape[0] != bs:
-        ref = ref[:1].repeat(bs, 1, 1, 1) if bs % ref.shape[0] else ref.repeat(bs // ref.shape[0], 1, 1, 1)
-    ref = comfy.ldm.common_dit.pad_to_patch_size(ref, (patch, patch))
-    hr_, wr_ = ref.shape[-2] // patch, ref.shape[-1] // patch
-    refimg = rearrange(ref, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch, pw=patch)
+    # Each reference becomes its own clean token block, tagged 1..N on position
+    # axis 0 (target = 0). Refs may differ in resolution.
+    refs = refs if isinstance(refs, (list, tuple)) else [refs]
+    ref_toks, ref_grids, ref_meta = [], [], []
+    for ref in refs:
+        input_shape = tuple(ref.shape)
+        ref = ref.to(device=x.device, dtype=x.dtype)
+        if ref.ndim == 5:
+            rb, rc, rt, rh, rw = ref.shape
+            ref = ref.reshape(rb * rt, rc, rh, rw)
+        if ref.shape[0] != bs:
+            ref = ref[:1].repeat(bs, 1, 1, 1) if bs % ref.shape[0] else ref.repeat(bs // ref.shape[0], 1, 1, 1)
+        ref = comfy.ldm.common_dit.pad_to_patch_size(ref, (patch, patch))
+        ref_grid = (ref.shape[-2] // patch, ref.shape[-1] // patch)
+        ref_tok = rearrange(ref, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch, pw=patch)
+        ref_grids.append(ref_grid)
+        ref_toks.append(ref_tok)
+        ref_meta.append({
+            "input_shape": input_shape,
+            "batched_shape": tuple(ref.shape),
+            "grid": ref_grid,
+            "tokens": ref_tok.shape[1],
+        })
 
-    img = model.first(torch.cat((img, refimg), dim=1))
+    img = model.first(torch.cat((img, *ref_toks), dim=1))
 
     context = model._unpack_context(context)
     t = model.tmlp(timestep_embedding(timesteps, model.tdim).unsqueeze(1).to(img.dtype))
@@ -47,6 +79,17 @@ def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, r
     combined = torch.cat((context, img), dim=1)
     device = combined.device
 
+    if log_details:
+        ref_summary = ", ".join(
+            f"ref{i + 1}=input{meta['input_shape']} batched{meta['batched_shape']} grid={meta['grid']} toks={meta['tokens']}"
+            for i, meta in enumerate(ref_meta)
+        )
+        _nk2e_log(
+            f"forward target={tuple(x.shape)} padded_target={(H, W)} target_grid={(h_, w_)} "
+            f"target_toks={tgtlen} txt_toks={txtlen} total_refs={len(ref_meta)} total_seq={combined.shape[1]} "
+            f"{ref_summary}"
+        )
+
     def grid(hh, ww, image_index):
         ids = torch.zeros(hh, ww, 3, device=device, dtype=torch.float32)
         ids[..., 0] = float(image_index)
@@ -55,7 +98,9 @@ def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, r
         return ids.reshape(1, hh * ww, 3).repeat(bs, 1, 1)
 
     txtpos = torch.zeros(bs, txtlen, 3, device=device, dtype=torch.float32)
-    pos = torch.cat((txtpos, grid(h_, w_, 0), grid(hr_, wr_, 1)), dim=1)  # target=0, ref=1
+    pos = torch.cat((txtpos, grid(h_, w_, 0),                       # target = 0
+                     *[grid(hh, ww, i + 1) for i, (hh, ww) in enumerate(ref_grids)]),
+                    dim=1)                                          # refs = 1..N
     freqs = model.pe_embedder(pos)
 
     for block in model.blocks:
@@ -71,7 +116,7 @@ def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, r
 
 
 def _wrapped_forward(get_ref, tag):
-    state = {"logged": False}
+    state = {"last_counter": None}
 
     def _wrapper(executor, *args, **kwargs):
         model = executor.class_obj
@@ -81,13 +126,17 @@ def _wrapped_forward(get_ref, tag):
         if ref is None:
             return executor(*args, **kwargs)
         transformer_options = args[4] if len(args) > 4 else kwargs.get("transformer_options", {})
-        if not state["logged"]:
-            print(f"[NK2E] {tag} active  x={tuple(args[0].shape)}  ref={tuple(ref.shape)}", flush=True)
-            state["logged"] = True
+        counter = _NK2E_REF.get("counter")
+        log_details = state["last_counter"] != counter
+        if log_details:
+            _nk2e_log(f"{tag} active token={counter} x={tuple(args[0].shape)} refs={_shape_list(ref)}")
+            state["last_counter"] = counter
         try:
-            out = _nk2e_incontext_forward(model, args[0], args[1], args[2], transformer_options, ref)
+            out = _nk2e_incontext_forward(
+                model, args[0], args[1], args[2], transformer_options, ref, log_details=log_details
+            )
         except Exception as e:
-            print(f"[NK2E] {tag} forward failed ({type(e).__name__}: {e}); falling back", flush=True)
+            _nk2e_log(f"{tag} forward failed ({type(e).__name__}: {e}); falling back")
             return executor(*args, **kwargs)
         return executor(*args, **kwargs) if out is None else out
 
@@ -123,7 +172,7 @@ class NK2EInContextModelNode(io.ComfyNode):
 
 def _get_ref(latent_in):
     raw = _NK2E_REF.get("current")
-    return None if raw is None else latent_in(raw)
+    return None if raw is None else [latent_in(r) for r in raw]
 
 
 class NK2ESetReferenceNode(io.ComfyNode):
@@ -133,16 +182,25 @@ class NK2ESetReferenceNode(io.ComfyNode):
             node_id="NK2ESetReferenceNode",
             display_name="NK2E Set Reference",
             category="NK2E",
-            description="Sets the reference (VAEEncode of the source) for NK2E In-Context (Model). "
-                        "Insert on positive: TextEncode -> here -> KSampler(positive).",
-            inputs=[io.Conditioning.Input("conditioning"), io.Latent.Input("reference")],
+            description="Adds one reference (VAEEncode of the source) for NK2E In-Context (Model). "
+                        "Insert on positive: TextEncode -> here -> more NK2E Set Reference nodes if needed -> "
+                        "KSampler(positive). Chain multiple nodes to accumulate multiple references.",
+            inputs=[
+                io.Conditioning.Input("conditioning"),
+                io.Latent.Input("reference"),
+            ],
             outputs=[io.Conditioning.Output()],
         )
 
     @classmethod
     def execute(cls, conditioning, reference):
-        _NK2E_REF["current"] = reference["samples"]
+        conditioning = node_helpers.conditioning_set_values(
+            conditioning, {"reference_latents": [reference["samples"]]}, append=True
+        )
+        refs = _conditioning_refs(conditioning)
+        _NK2E_REF["current"] = refs
         _NK2E_REF["counter"] += 1
+        _nk2e_log(f"set reference token={_NK2E_REF['counter']} refs={len(refs)} shapes={_shape_list(refs)}")
         c = node_helpers.conditioning_set_values(conditioning, {"nk2e_ref_token": _NK2E_REF["counter"]})
         return io.NodeOutput(c)
 
