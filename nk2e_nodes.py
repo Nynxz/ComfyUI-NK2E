@@ -8,8 +8,13 @@ from comfy.ldm.flux.layers import timestep_embedding
 from comfy_api.latest import io
 import node_helpers
 
-WRAPPER_KEY = "nk2e_incontext"
-MODEL_REF_KEY = "nk2e_incontext_ref"
+# Keep off comfy's "reference_latents": the stock ReferenceLatent node writes it, and
+# sharing the key would let unrelated nodes feed refs into NK2E and vice versa.
+REF_COND_KEY = "nk2e_refs"
+REF_TOKEN_KEY = "nk2e_ref_token"  # bumped per run so KSampler can't reuse a stale sample
+
+WRAPPER_KEY_INCONTEXT = "nk2e_incontext_ref"
+WRAPPER_KEY_LEGACY = "nk2e_incontext"
 
 
 def _nk2e_log(message):
@@ -19,15 +24,6 @@ def _nk2e_log(message):
 def _shape_list(refs):
     refs = refs if isinstance(refs, (list, tuple)) else [refs]
     return [tuple(ref.shape) for ref in refs]
-
-
-def _conditioning_refs(conditioning):
-    refs = []
-    for _, cond in conditioning:
-        cond_refs = cond.get("reference_latents")
-        if cond_refs is not None and len(cond_refs) > len(refs):
-            refs = cond_refs
-    return list(refs)
 
 
 def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, refs, log_details=False):
@@ -43,11 +39,11 @@ def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, r
     h_, w_ = H // patch, W // patch
     img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch, pw=patch)
 
-    # Each reference becomes its own clean token block, tagged 1..N on position
-    # axis 0 (target = 0). Refs may differ in resolution.
+    # Each ref becomes its own token block, tagged 1..N on position axis 0 (target = 0),
+    # so refs may differ in resolution from the target and from each other.
     refs = refs if isinstance(refs, (list, tuple)) else [refs]
-    ref_toks, ref_grids, ref_meta = [], [], []
-    for ref in refs:
+    ref_toks, ref_grids, ref_log = [], [], []
+    for i, ref in enumerate(refs):
         input_shape = tuple(ref.shape)
         ref = ref.to(device=x.device, dtype=x.dtype)
         if ref.ndim == 5:
@@ -60,12 +56,9 @@ def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, r
         ref_tok = rearrange(ref, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch, pw=patch)
         ref_grids.append(ref_grid)
         ref_toks.append(ref_tok)
-        ref_meta.append({
-            "input_shape": input_shape,
-            "batched_shape": tuple(ref.shape),
-            "grid": ref_grid,
-            "tokens": ref_tok.shape[1],
-        })
+        if log_details:
+            ref_log.append(f"ref{i + 1}=input{input_shape} batched{tuple(ref.shape)} "
+                           f"grid={ref_grid} toks={ref_tok.shape[1]}")
 
     img = model.first(torch.cat((img, *ref_toks), dim=1))
 
@@ -80,14 +73,10 @@ def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, r
     device = combined.device
 
     if log_details:
-        ref_summary = ", ".join(
-            f"ref{i + 1}=input{meta['input_shape']} batched{meta['batched_shape']} grid={meta['grid']} toks={meta['tokens']}"
-            for i, meta in enumerate(ref_meta)
-        )
         _nk2e_log(
             f"forward target={tuple(x.shape)} padded_target={(H, W)} target_grid={(h_, w_)} "
-            f"target_toks={tgtlen} txt_toks={txtlen} total_refs={len(ref_meta)} total_seq={combined.shape[1]} "
-            f"{ref_summary}"
+            f"target_toks={tgtlen} txt_toks={txtlen} total_refs={len(refs)} total_seq={combined.shape[1]} "
+            + ", ".join(ref_log)
         )
 
     def grid(hh, ww, image_index):
@@ -98,9 +87,9 @@ def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, r
         return ids.reshape(1, hh * ww, 3).repeat(bs, 1, 1)
 
     txtpos = torch.zeros(bs, txtlen, 3, device=device, dtype=torch.float32)
-    pos = torch.cat((txtpos, grid(h_, w_, 0),                       # target = 0
+    pos = torch.cat((txtpos, grid(h_, w_, 0),
                      *[grid(hh, ww, i + 1) for i, (hh, ww) in enumerate(ref_grids)]),
-                    dim=1)                                          # refs = 1..N
+                    dim=1)
     freqs = model.pe_embedder(pos)
 
     for block in model.blocks:
@@ -143,9 +132,24 @@ def _wrapped_forward(get_ref, tag):
     return _wrapper
 
 
-# Reference rides a side channel; the wrapper is registered once, so changing the
-# reference does not reload the model.
+# Refs ride a global rather than the conditioning so the wrapper can be registered
+# once: changing the reference then doesn't reload the model.
 _NK2E_REF = {"current": None, "counter": 0}
+
+
+def _conditioning_refs(conditioning):
+    """The longest ref chain on any cond entry, i.e. what the last Set Reference built up."""
+    refs = []
+    for _, cond in conditioning:
+        cond_refs = cond.get(REF_COND_KEY)
+        if cond_refs is not None and len(cond_refs) > len(refs):
+            refs = cond_refs
+    return list(refs)
+
+
+def _get_ref(latent_in):
+    raw = _NK2E_REF.get("current")
+    return None if raw is None else [latent_in(r) for r in raw]
 
 
 class NK2EInContextModelNode(io.ComfyNode):
@@ -166,13 +170,8 @@ class NK2EInContextModelNode(io.ComfyNode):
         latent_in = model.model.process_latent_in
         m = model.clone()
         m.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
-                               MODEL_REF_KEY, _wrapped_forward(lambda: _get_ref(latent_in), "in-context"))
+                               WRAPPER_KEY_INCONTEXT, _wrapped_forward(lambda: _get_ref(latent_in), "in-context"))
         return io.NodeOutput(m)
-
-
-def _get_ref(latent_in):
-    raw = _NK2E_REF.get("current")
-    return None if raw is None else [latent_in(r) for r in raw]
 
 
 class NK2ESetReferenceNode(io.ComfyNode):
@@ -193,15 +192,21 @@ class NK2ESetReferenceNode(io.ComfyNode):
         )
 
     @classmethod
+    def fingerprint_inputs(cls, **kwargs):
+        # NaN = never cache. Must run every prompt, or the global keeps a previous
+        # run's refs and a single-ref graph silently samples with a stale extra ref.
+        return float("nan")
+
+    @classmethod
     def execute(cls, conditioning, reference):
         conditioning = node_helpers.conditioning_set_values(
-            conditioning, {"reference_latents": [reference["samples"]]}, append=True
+            conditioning, {REF_COND_KEY: [reference["samples"]]}, append=True
         )
         refs = _conditioning_refs(conditioning)
         _NK2E_REF["current"] = refs
         _NK2E_REF["counter"] += 1
         _nk2e_log(f"set reference token={_NK2E_REF['counter']} refs={len(refs)} shapes={_shape_list(refs)}")
-        c = node_helpers.conditioning_set_values(conditioning, {"nk2e_ref_token": _NK2E_REF["counter"]})
+        c = node_helpers.conditioning_set_values(conditioning, {REF_TOKEN_KEY: _NK2E_REF["counter"]})
         return io.NodeOutput(c)
 
 
@@ -224,5 +229,5 @@ class NK2EInContextEditNode(io.ComfyNode):
         ref = model.model.process_latent_in(reference["samples"])
         m = model.clone()
         m.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
-                               WRAPPER_KEY, _wrapped_forward(lambda: ref, "in-context(legacy)"))
+                               WRAPPER_KEY_LEGACY, _wrapped_forward(lambda: ref, "in-context(legacy)"))
         return io.NodeOutput(m)
