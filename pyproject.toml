@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-nk2e"
-version = "0.1.0"
+version = "0.1.1"
 description = "NK2E — experimental, unofficial in-context image editing for Krea 2 (community project; not affiliated with Krea)."
 readme = "README.md"
 requires-python = ">=3.10"
