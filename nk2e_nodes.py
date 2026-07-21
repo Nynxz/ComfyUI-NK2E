@@ -1,12 +1,12 @@
 """ComfyUI-NK2E: in-context image editing for Krea 2. Not affiliated with Krea."""
-import torch
-from einops import rearrange
 
-import comfy.patcher_extension
 import comfy.ldm.common_dit
+import comfy.patcher_extension
+import node_helpers
+import torch
 from comfy.ldm.flux.layers import timestep_embedding
 from comfy_api.latest import io
-import node_helpers
+from einops import rearrange
 
 # Keep off comfy's "reference_latents": the stock ReferenceLatent node writes it, and
 # sharing the key would let unrelated nodes feed refs into NK2E and vice versa.
@@ -57,8 +57,9 @@ def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, r
         ref_grids.append(ref_grid)
         ref_toks.append(ref_tok)
         if log_details:
-            ref_log.append(f"ref{i + 1}=input{input_shape} batched{tuple(ref.shape)} "
-                           f"grid={ref_grid} toks={ref_tok.shape[1]}")
+            ref_log.append(
+                f"ref{i + 1}=input{input_shape} batched{tuple(ref.shape)} grid={ref_grid} toks={ref_tok.shape[1]}"
+            )
 
     img = model.first(torch.cat((img, *ref_toks), dim=1))
 
@@ -87,17 +88,14 @@ def _nk2e_incontext_forward(model, x, timesteps, context, transformer_options, r
         return ids.reshape(1, hh * ww, 3).repeat(bs, 1, 1)
 
     txtpos = torch.zeros(bs, txtlen, 3, device=device, dtype=torch.float32)
-    pos = torch.cat((txtpos, grid(h_, w_, 0),
-                     *[grid(hh, ww, i + 1) for i, (hh, ww) in enumerate(ref_grids)]),
-                    dim=1)
+    pos = torch.cat((txtpos, grid(h_, w_, 0), *[grid(hh, ww, i + 1) for i, (hh, ww) in enumerate(ref_grids)]), dim=1)
     freqs = model.pe_embedder(pos)
 
     for block in model.blocks:
         combined = block(combined, tvec, freqs, None, transformer_options=transformer_options)
 
-    out = model.last(combined, t)[:, txtlen:txtlen + tgtlen, :]
-    out = rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)",
-                    h=h_, w=w_, ph=patch, pw=patch, c=model.channels)
+    out = model.last(combined, t)[:, txtlen : txtlen + tgtlen, :]
+    out = rearrange(out, "b (h w) (c ph pw) -> b c (h ph) (w pw)", h=h_, w=w_, ph=patch, pw=patch, c=model.channels)
     out = out[:, :, :H_orig, :W_orig]
     if temporal:
         out = out.reshape(b5, t5, model.channels, H_orig, W_orig).movedim(1, 2)
@@ -160,7 +158,7 @@ class NK2EInContextModelNode(io.ComfyNode):
             display_name="NK2E In-Context (Model)",
             category="NK2E",
             description="In-context edit wrapper; reads the reference from NK2E Set Reference. "
-                        "Wire: LoraLoaderModelOnly -> here -> KSampler(model).",
+            "Wire: LoraLoaderModelOnly -> here -> KSampler(model).",
             inputs=[io.Model.Input("model")],
             outputs=[io.Model.Output("MODEL")],
         )
@@ -169,8 +167,11 @@ class NK2EInContextModelNode(io.ComfyNode):
     def execute(cls, model):
         latent_in = model.model.process_latent_in
         m = model.clone()
-        m.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
-                               WRAPPER_KEY_INCONTEXT, _wrapped_forward(lambda: _get_ref(latent_in), "in-context"))
+        m.add_wrapper_with_key(
+            comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
+            WRAPPER_KEY_INCONTEXT,
+            _wrapped_forward(lambda: _get_ref(latent_in), "in-context"),
+        )
         return io.NodeOutput(m)
 
 
@@ -182,8 +183,8 @@ class NK2ESetReferenceNode(io.ComfyNode):
             display_name="NK2E Set Reference",
             category="NK2E",
             description="Adds one reference (VAEEncode of the source) for NK2E In-Context (Model). "
-                        "Insert on positive: TextEncode -> here -> more NK2E Set Reference nodes if needed -> "
-                        "KSampler(positive). Chain multiple nodes to accumulate multiple references.",
+            "Insert on positive: TextEncode -> here -> more NK2E Set Reference nodes if needed -> "
+            "KSampler(positive). Chain multiple nodes to accumulate multiple references.",
             inputs=[
                 io.Conditioning.Input("conditioning"),
                 io.Latent.Input("reference"),
@@ -219,7 +220,7 @@ class NK2EInContextEditNode(io.ComfyNode):
             display_name="NK2E In-Context Edit",
             category="NK2E",
             description="Legacy single-node edit (reloads the model on reference change). "
-                        "reference = VAEEncode(source); KSampler gets an empty latent, denoise 1.0.",
+            "reference = VAEEncode(source); KSampler gets an empty latent, denoise 1.0.",
             inputs=[io.Model.Input("model"), io.Latent.Input("reference")],
             outputs=[io.Model.Output("MODEL")],
         )
@@ -228,6 +229,9 @@ class NK2EInContextEditNode(io.ComfyNode):
     def execute(cls, model, reference):
         ref = model.model.process_latent_in(reference["samples"])
         m = model.clone()
-        m.add_wrapper_with_key(comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
-                               WRAPPER_KEY_LEGACY, _wrapped_forward(lambda: ref, "in-context(legacy)"))
+        m.add_wrapper_with_key(
+            comfy.patcher_extension.WrappersMP.DIFFUSION_MODEL,
+            WRAPPER_KEY_LEGACY,
+            _wrapped_forward(lambda: ref, "in-context(legacy)"),
+        )
         return io.NodeOutput(m)
