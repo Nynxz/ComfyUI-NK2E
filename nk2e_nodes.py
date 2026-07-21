@@ -112,7 +112,12 @@ def _wrapped_forward(get_ref, tag):
         ref = get_ref()
         if ref is None:
             return executor(*args, **kwargs)
-        transformer_options = args[4] if len(args) > 4 else kwargs.get("transformer_options", {})
+        # Positional index is not stable: c9602625 inserted ref_latents ahead of
+        # transformer_options in SingleStreamDiT.forward, so args[4] became the ref list.
+        # Take it by keyword, else the first dict in the tail — works on both signatures.
+        transformer_options = kwargs.get("transformer_options")
+        if not isinstance(transformer_options, dict):
+            transformer_options = next((a for a in args[3:] if isinstance(a, dict)), {})
         counter = _NK2E_REF.get("counter")
         log_details = state["last_counter"] != counter
         if log_details:
