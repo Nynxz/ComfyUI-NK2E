@@ -11,7 +11,7 @@ from einops import rearrange
 # Keep off comfy's "reference_latents": the stock ReferenceLatent node writes it, and
 # sharing the key would let unrelated nodes feed refs into NK2E and vice versa.
 REF_COND_KEY = "nk2e_refs"
-REF_TOKEN_KEY = "nk2e_ref_token"  # bumped per run so KSampler can't reuse a stale sample
+REF_TOKEN_KEY = "nk2e_ref_token"
 
 WRAPPER_KEY_INCONTEXT = "nk2e_incontext_ref"
 WRAPPER_KEY_LEGACY = "nk2e_incontext"
@@ -195,6 +195,7 @@ class NK2ESetReferenceNode(io.ComfyNode):
                 io.Latent.Input("reference"),
             ],
             outputs=[io.Conditioning.Output()],
+            is_deprecated=True,
         )
 
     @classmethod
@@ -228,6 +229,7 @@ class NK2EInContextEditNode(io.ComfyNode):
             "reference = VAEEncode(source); KSampler gets an empty latent, denoise 1.0.",
             inputs=[io.Model.Input("model"), io.Latent.Input("reference")],
             outputs=[io.Model.Output("MODEL")],
+            is_deprecated=True,
         )
 
     @classmethod
